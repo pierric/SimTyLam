@@ -1,0 +1,255 @@
+imports
+{
+import Basic
+}
+
+DATA AGItf
+  | AGItf expr : Expr
+
+DATA Expr
+  | IConst  int   : {Int}
+  | CConst  char  : {Char}
+  | Var     nm    : {HsName}
+  | OpPre   nm    : {HsName}
+  | OpBin   nm    : {HsName}
+  | OpPos   nm    : {HsName}
+  | App     func  : Expr
+            arg   : Expr
+  | Let     decls : Decls
+            pat   : PatExpr
+            value : Expr
+            body  : Expr
+  | Lam     pat   : PatExpr
+            ty    : TyExpr
+            body  : Expr
+  | Parens  expr  : Expr
+  | Prod    e1    : Expr
+            e2    : Expr
+  | Sum     e1    : Expr
+            e2    : Expr
+
+DATA Decl
+  | Decl   nm      : {HsName}
+           tyExpr  : TyExpr
+TYPE Decls = [Decl]
+
+DATA PatExpr
+  | IConst  int     : {Int}
+  | CConst  char    : {Char}
+  | Var     nm      : {HsName}
+  | VarAs   nm      : {HsName}
+            pat     : PatExpr
+  | Prod    pat1    : PatExpr
+            pat2    : PatExpr
+  | Sum     pat1    : PatExpr
+            pat2    : PatExpr
+  | Parens  pat     : PatExpr
+
+DATA TyExpr
+  | Int
+  | Char
+  | Prod    ty1     : TyExpr
+            ty2     : TyExpr
+  | Sum     ty1     : TyExpr
+            ty2     : TyExpr
+  | Arrow   ty1     : TyExpr
+            ty2     : TyExpr
+  | Parens  ty      : TyExpr  
+
+ATTR AGItf [ env : {Bindings}
+           |
+           | expr : {ExprT (Either Typ TyErr)} ]
+SEM AGItf 
+  | AGItf   -- expr.env = emptyB
+            lhs.expr = @expr.expr
+
+ATTR PatExpr [
+             | gdecls    : {Bindings}
+             | rsTyp     : {Typ} 
+               bindings1 : {Bindings} 
+               err1      : {TyPatErr} ]
+
+SEM PatExpr
+  | IConst  lhs.rsTyp     = TyInt
+            lhs.bindings1 = emptyB            
+            lhs.err1      = TyPatOK
+  | CConst  lhs.rsTyp     = TyChar
+            lhs.bindings1 = emptyB
+            lhs.err1      = TyPatOK
+  | Var     loc.((mapping, gdecls'), err)
+              = case popB @lhs.gdecls @nm of
+                  Nothing -> (undefined, TyPatNoSig)
+                  Just a  -> (a        , TyPatOK)
+            lhs.gdecls    = @gdecls'
+            lhs.rsTyp     = typeB @mapping
+            lhs.bindings1 = singletonB @mapping
+            lhs.err1      = @err
+  | VarAs   loc.((mapping, gdecls'), err)
+              = case popB @lhs.gdecls @nm of
+                  Nothing -> (undefined, TyPatNoSig)
+                  Just a  -> (a        , TyPatOK)
+            pat.gdecls    = @gdecls'
+            lhs.rsTyp     = typeB @mapping
+            lhs.bindings1 = pushB @mapping @pat.bindings1
+            lhs.err1      = @err `tyPatErrPlus` @pat.err1
+  | Prod    lhs.rsTyp     = TyProd @pat1.rsTyp @pat2.rsTyp
+            lhs.bindings1 = @pat1.bindings1 `concatB` @pat2.bindings1
+            lhs.err1      = @pat1.err1 `tyPatErrPlus` @pat2.err1
+  | Sum     lhs.rsTyp     = TySum  @pat1.rsTyp @pat2.rsTyp
+            lhs.bindings1 = @pat1.bindings1 `concatB` @pat2.bindings1
+            lhs.err1      = @pat1.err1 `tyPatErrPlus` @pat2.err1
+
+ATTR PatExpr [ knTyp     : {Typ}
+             |
+             | bindings2 : {Bindings} 
+               err2      : {TyPatErr} ]
+
+SEM PatExpr
+  | IConst  lhs.err2      = if @lhs.knTyp `tyEq` TyInt  then TyPatOK else TyPatClash
+            lhs.bindings2 = emptyB
+  | CConst  lhs.err2      = if @lhs.knTyp `tyEq` TyChar then TyPatOK else TyPatClash
+            lhs.bindings2 = emptyB
+  | Var     lhs.err2      = TyPatOK
+            lhs.bindings2 = singletonB (makeB @nm @lhs.knTyp)
+  | VarAs   pat.knTyp     = @lhs.knTyp
+            lhs.err2      = @pat.err2
+            lhs.bindings2 = pushB (makeB @nm @lhs.knTyp) @pat.bindings2
+  | Prod    loc.((t1,t2),err)
+              = case @lhs.knTyp of
+                  TyProd s1 s2 -> ((s1,s2)  , TyPatOK)
+                  _            -> (undefined, TyPatClash)
+            pat1.knTyp    = @t1
+            pat2.knTyp    = @t2
+            lhs.err2      = @err
+            lhs.bindings2 = @pat1.bindings2 `concatB` @pat2.bindings2 
+   | Sum    loc.((t1,t2),err)
+              = case @lhs.knTyp of
+                  TySum s1 s2 -> ((s1,s2)  , TyPatOK)
+                  _            -> (undefined, TyPatClash)
+            pat1.knTyp    = @t1
+            pat2.knTyp    = @t2
+            lhs.err2      = @err
+            lhs.bindings2 = @pat1.bindings2 `concatB` @pat2.bindings2
+
+ATTR Expr [ env  : {Bindings}
+          |
+          | typ  : {Typ}
+            expr : {ExprT (Either Typ TyErr)}]
+
+ATTR Decl Decls PatExpr TyExpr [|| copy : SELF]
+
+SEM Expr
+  | IConst  lhs.typ  = TyInt
+            lhs.expr = IConstT (Left TyInt)  @int
+
+  | CConst  lhs.typ  = TyChar
+            lhs.expr = CConstT (Left TyChar) @char
+
+  | Var     loc.t    =
+              case lookupB @nm @lhs.env of
+                Just t -> Left t
+                _      -> Right TyErrUnbounded
+            lhs.typ  = fromLeft TyAny @t
+            lhs.expr = VarT @t @nm
+
+  | OpPre   loc.t    = 
+              case lookupB @nm @lhs.env of
+                Just t -> Left t
+                _      -> Right TyErrUnbounded
+            lhs.typ  = fromLeft TyAny @t
+            lhs.expr = OpPreT @t @nm 
+  | OpBin   loc.t    = 
+              case lookupB @nm @lhs.env of
+                Just t -> Left t
+                _      -> Right TyErrUnbounded
+            lhs.typ  = fromLeft TyAny @t
+            lhs.expr = OpBinT @t @nm 
+  | OpPos   loc.t    = 
+              case lookupB @nm @lhs.env of
+                Just t -> Left t
+                _      -> Right TyErrUnbounded
+            lhs.typ  = fromLeft TyAny @t
+            lhs.expr = OpPosT @t @nm 
+
+  | App     loc.t    = 
+              case (@func.typ, @arg.typ) of
+                (TyArrow a b, a') | a `tyEq` a'     -> Left b
+                (TyAny, _)                          -> Left TyAny
+                _                                   -> Right TyErrMismatch
+            lhs.typ  = fromLeft TyAny @t
+            lhs.expr = AppT @t @func.expr @arg.expr
+
+  | Let     pat.gdecls = @decls.gathDecls
+            pat.knTyp  = undefined
+            body.env   = @lhs.env `concatB` @pat.bindings1
+            loc.t      = if @pat.err1 /= TyPatOK then
+                             Right (tyPatErrToTyErr @pat.err1)
+                         else if not (null @pat.gdecls) then
+                             Right TyErrNoBinding
+                         else if not (@value.typ `tyEq` @pat.rsTyp) then
+                             Right TyErrMismatch
+                         else 
+                             Left @body.typ
+            lhs.typ    = fromLeft TyAny @t
+            lhs.expr   = LetT @t @decls.copy @pat.copy @value.expr @body.expr
+
+  | Lam     loc.argt    = @ty.typ
+            pat.gdecls  = undefined
+            pat.knTyp   = @argt
+            body.env    = @lhs.env `concatB` @pat.bindings2
+            loc.t       = if @pat.err2 /= TyPatOK then
+                              Right (tyPatErrToTyErr @pat.err2)
+                          else
+                              Left (TyArrow @argt @body.typ)
+            lhs.typ     = fromLeft TyAny @t
+            lhs.expr    = LamT @t @pat.copy @ty.copy @body.expr
+  | Parens  loc.t       = @expr.typ
+            lhs.typ     = @t
+            lhs.expr    = ParensT (Left @t) @expr.expr
+  | Prod    loc.t       = TyProd @e1.typ @e2.typ
+            lhs.typ     = @t
+            lhs.expr    = ProdT (Left @t) @e1.expr @e2.expr
+  | Sum     loc.t       = TySum  @e1.typ @e2.typ
+            lhs.typ     = @t
+            lhs.expr    = SumT  (Left @t) @e1.expr @e2.expr
+            
+
+
+ATTR TyExpr [||typ : {Typ}]
+SEM TyExpr
+  | Int     lhs.typ     = TyInt
+  | Char    lhs.typ     = TyChar
+  | Prod    lhs.typ     = TyProd @ty1.typ @ty2.typ
+  | Sum     lhs.typ     = TyProd @ty1.typ @ty2.typ
+  | Arrow   lhs.typ     = TyProd @ty1.typ @ty2.typ
+
+ATTR Decls [||gathDecls : {Bindings}]
+SEM Decls
+  | Cons    lhs.gathDecls = pushB @hd.decl @tl.gathDecls
+  | Nil     lhs.gathDecls = emptyB
+ATTR Decl  [||decl : {Binding}]
+SEM Decl
+  | Decl    lhs.decl = makeB @nm @tyExpr.typ
+
+
+INCLUDE "PPrint.ag"
+
+DERIVING Decl PatExpr TyExpr: Show
+
+{
+data ExprT a = IConstT  a Int
+             | CConstT  a Char  
+             | VarT     a HsName
+             | OpPreT   a HsName
+             | OpBinT   a HsName
+             | OpPosT   a HsName
+             | AppT     a (ExprT a) (ExprT a)
+             | LetT     a Decls PatExpr (ExprT a) (ExprT a)
+             | LamT     a PatExpr TyExpr (ExprT a)
+             | ParensT  a (ExprT a)
+             | ProdT    a (ExprT a) (ExprT a)
+             | SumT     a (ExprT a) (ExprT a)
+             deriving Show
+
+fromLeft a e = either id (const a) e
+}

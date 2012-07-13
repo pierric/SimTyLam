@@ -1,0 +1,69 @@
+imports
+{
+import Text.PrettyPrint
+}
+
+ATTR AGItf Expr PatExpr TyExpr Decl Decls [|| pp : Doc]
+ATTR Expr [||opbin : {Bool}]
+
+SEM AGItf
+  | AGItf  lhs.pp = @expr.pp
+
+SEM Expr
+  | IConst  lhs.pp    = int @int
+            lhs.opbin = False
+  | CConst  lhs.pp    = char @char
+            lhs.opbin = False
+  | Var     lhs.pp    = text @nm
+            lhs.opbin = False
+  | OpPre   lhs.pp    = text @nm
+            lhs.opbin = False
+  | OpBin   lhs.pp    = text @nm
+            lhs.opbin = True
+  | OpPos   lhs.pp    = text @nm
+            lhs.opbin = False
+  | App     lhs.pp    = if @func.opbin then
+                            @arg.pp <+> @func.pp
+                        else
+                            @func.pp <+> @arg.pp
+            lhs.opbin = False
+  | Let     lhs.pp    = text "let" <+> (@decls.pp $+$ @pat.pp <+> text "=" <+> @value.pp) $+$
+                        text "in" <+> @body.pp
+            lhs.opbin = False
+  | Lam     lhs.pp    = char '\\' <+> @pat.pp <+> text "::" <+> @ty.pp <+> text "->" <+> @body.pp
+            lhs.opbin = False
+  | Parens  lhs.pp    = parens @expr.pp
+            lhs.opbin = False
+  | Prod    lhs.pp    = parens (@e1.pp <> char ',' <+> @e2.pp)
+            lhs.opbin = False
+  | Sum     lhs.pp    = angles (@e1.pp <> char ',' <+> @e2.pp)
+            lhs.opbin = False
+
+SEM PatExpr
+  | IConst  lhs.pp = int @int
+  | CConst  lhs.pp = char @char
+  | Var     lhs.pp = text @nm
+  | VarAs   lhs.pp = text @nm <> char '@' <> parens @pat.pp
+  | Prod    lhs.pp = parens (@pat1.pp <> char ',' <+> @pat2.pp)
+  | Sum     lhs.pp = angles (@pat1.pp <> char ',' <+> @pat2.pp)
+  | Parens  lhs.pp = parens @pat.pp
+
+SEM TyExpr
+  | Int     lhs.pp = text "Int"
+  | Char    lhs.pp = text "Char"
+  | Prod    lhs.pp = parens (@ty1.pp <> char ',' <+> @ty2.pp)
+  | Sum     lhs.pp = angles (@ty1.pp <> char ',' <+> @ty2.pp)
+  | Arrow   lhs.pp = @ty1.pp <+> text "->" <+> @ty2.pp
+  | Parens  lhs.pp = parens @ty.pp
+
+SEM Decl  
+  | Decl    lhs.pp = text @nm <+> text "::" <+> @tyExpr.pp
+
+SEM Decls
+  | Cons    lhs.pp = @hd.pp $+$ @tl.pp
+  | Nil     lhs.pp = empty
+
+{
+angles p = char '<' <> p <> char '>'
+}
+ 
